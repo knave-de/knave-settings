@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'USAGE'
+Usage: scripts/install.sh [--user | --system]
+
+Builds and installs knave-settings, its desktop launcher, and application icon.
+Defaults to --system. System installs request sudo for privileged file writes.
+USAGE
+}
+
+mode=system
+case "${1-}" in
+    "") ;;
+    --user) mode=user ;;
+    --system) mode=system ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+esac
+if (($# > 1)); then usage >&2; exit 2; fi
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+project_dir=$(cd -- "$script_dir/.." && pwd)
+
+if [[ $mode == user ]]; then
+    data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
+    bin_dir=${XDG_BIN_HOME:-"$HOME/.local/bin"}
+    app_dir="$data_home/applications"
+    icon_dir="$data_home/icons/hicolor/scalable/apps"
+else
+    prefix=${PREFIX:-/usr/local}
+    bin_dir="$prefix/bin"
+    app_dir="$prefix/share/applications"
+    icon_dir="$prefix/share/icons/hicolor/scalable/apps"
+fi
+
+cargo build --release --locked --manifest-path "$project_dir/Cargo.toml"
+target_dir=$(cargo metadata --no-deps --format-version 1 --manifest-path "$project_dir/Cargo.toml" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+
+privilege=()
+# Check the nearest existing ancestor for prefixes that have yet to be created.
+writable_directory() {
+    local destination=$1
+    while [[ ! -e $destination ]]; do
+        destination=$(dirname -- "$destination")
+    done
+    [[ -d $destination && -w $destination && -x $destination ]]
+}
+
+if [[ $mode == system && $(id -u) -ne 0 ]] &&
+    ! (writable_directory "$bin_dir" && writable_directory "$app_dir" && writable_directory "$icon_dir"); then
+    if ! command -v sudo >/dev/null 2>&1; then
+        printf 'System installation needs root privileges, but sudo was not found. Run with sudo or use --user.\n' >&2
+        exit 1
+    fi
+    sudo -v
+    privilege=(sudo)
+fi
+
+"${privilege[@]}" install -Dm755 "$target_dir/release/knave-settings" "$bin_dir/knave-settings"
+"${privilege[@]}" install -Dm644 "$project_dir/data/de.knave.Settings.desktop" "$app_dir/de.knave.Settings.desktop"
+"${privilege[@]}" install -Dm644 "$project_dir/data/icons/knave-settings.svg" "$icon_dir/de.knave.Settings.svg"
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+    "${privilege[@]}" update-desktop-database "$app_dir" || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1 && [[ $mode == system ]]; then
+    "${privilege[@]}" gtk-update-icon-cache -q -t "$prefix/share/icons/hicolor" 2>/dev/null || true
+fi
+printf 'Installed knave-settings (%s)\n  binary: %s\n  launcher: %s\n  icon: %s\n' "$mode" "$bin_dir/knave-settings" "$app_dir/de.knave.Settings.desktop" "$icon_dir/de.knave.Settings.svg"
