@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Knave Settings
+Comment=Configure your Knave desktop
+Exec=knave-settings
+Icon=de.knave.Settings
+Terminal=false
+Categories=Settings;DesktopSettings;
+Keywords=preferences;appearance;wallpaper;shortcuts;
+StartupNotify=true
+StartupWMClass=knave-settings
